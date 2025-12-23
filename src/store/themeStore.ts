@@ -65,9 +65,11 @@ export const useThemeStore = create<ThemeState>()(
         
         if (shouldBeDark) {
           root.classList.add('dark')
+          root.dataset.theme = 'dark'
           set({ isDark: true })
         } else {
           root.classList.remove('dark')
+          root.dataset.theme = 'light'
           set({ isDark: false })
         }
       },

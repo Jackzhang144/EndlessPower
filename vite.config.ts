@@ -1,130 +1,83 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
-import { readFileSync } from 'fs'
-import { resolve } from 'path'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { execSync } from 'node:child_process'
 
-// 读取package.json获取版本信息
-const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8'))
+const packageJson = JSON.parse(readFileSync(resolve('package.json'), 'utf8')) as { version: string }
 const version = packageJson.version
+const isAutomatedRun = Boolean(process.env.PLAYWRIGHT) || Boolean(process.env.CI)
+const enablePwaInDev = process.env.VITE_PWA_DEV === '1' && !isAutomatedRun
 
-// 获取Git提交信息（可选）
-const getGitCommit = () => {
+function getGitCommit(): string {
   try {
-    const { execSync } = require('child_process')
     return execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim()
-  } catch (error) {
+  } catch {
     return 'unknown'
   }
 }
 
 export default defineConfig({
   define: {
-    // 注入版本信息到运行时
     __APP_VERSION__: JSON.stringify(version),
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     __GIT_COMMIT__: JSON.stringify(getGitCommit())
+  },
+  resolve: {
+    alias: {
+      // Use the prebuilt CSS to avoid unsupported `oklch()` / `color-mix()` in some WebViews.
+      '@heroui/styles': resolve('node_modules/@heroui/styles/dist/heroui.min.css')
+    }
   },
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'mask-icon.svg'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.svg', 'mask-icon.svg', 'offline.html', 'map.jpg'],
       manifest: {
         name: 'EndlessPower 充电桩查询',
         short_name: 'EndlessPower',
-        description: '智能充电桩查询应用，实时显示附近充电站状态，支持充电桩导航、收藏管理，为新能源汽车用户提供便捷充电服务。',
-        version: version,
-        theme_color: '#3B82F6',
-        background_color: '#F9FAFB',
+        description: '充电桩实时查询地图，支持收藏、搜索与插座监控。',
+        version,
+        theme_color: '#0b0f18',
+        background_color: '#0b0f18',
         display: 'fullscreen',
         display_override: ['fullscreen', 'standalone', 'minimal-ui'],
         orientation: 'portrait',
         scope: '/',
         start_url: '/',
         lang: 'zh-CN',
-        categories: ['lifestyle', 'utilities', 'travel', 'navigation'],
-        keywords: [
-          '充电桩', '充电站', '电动汽车充电', '新能源汽车', 
-          '充电桩查询', '充电桩地图', '闪开来电', 'EndlessPower',
-          '实时充电状态', '附近充电桩', '充电桩导航', 'EV充电'
-        ],
+        categories: ['utilities', 'travel', 'navigation'],
         icons: [
-          {
-            src: 'pwa-192x192.svg',
-            sizes: '192x192',
-            type: 'image/svg+xml'
-          },
-          {
-            src: 'pwa-512x512.svg',
-            sizes: '512x512',
-            type: 'image/svg+xml'
-          },
-          {
-            src: 'pwa-512x512.svg',
-            sizes: '512x512',
-            type: 'image/svg+xml',
-            purpose: 'any maskable'
-          }
+          { src: 'pwa-192x192.svg', sizes: '192x192', type: 'image/svg+xml' },
+          { src: 'pwa-512x512.svg', sizes: '512x512', type: 'image/svg+xml' },
+          { src: 'pwa-512x512.svg', sizes: '512x512', type: 'image/svg+xml', purpose: 'any maskable' }
         ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        runtimeCaching: [
-          {
-            urlPattern: /^https:\/\/(corsproxy\.io|api\.allorigins\.win|proxy\.cors\.sh|api\.codetabs\.com|cors-anywhere\.herokuapp\.com|cors\.bridged\.cc)\/.*/i,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'api-cache',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24 // 24 hours
-              },
-              cacheableResponse: {
-                statuses: [0, 200]
-              }
-            }
-          },
-          {
-            urlPattern: /^https:\/\/unpkg\.com\/.*/i,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'cdn-cache',
-              expiration: {
-                maxEntries: 50,
-                maxAgeSeconds: 60 * 60 * 24 * 30 // 30 days
-              }
-            }
-          },
-          {
-            urlPattern: /^https:\/\/wprd0[1-4]\.is\.autonavi\.com\/.*/i,
-            handler: 'StaleWhileRevalidate',
-            options: {
-              cacheName: 'map-tiles-cache',
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60 * 24 * 7 // 7 days
-              }
-            }
-          }
-        ]
+        // SPA 路由回退必须指向主入口；`offline.html` 仅用于离线页面
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/offline\.html$/],
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,jpg}']
       },
-      devOptions: {
-        enabled: true
-      }
+      // 默认不开启 Dev SW，避免出现“本地开发直接进入离线页/缓存异常”的问题；需要时可 `VITE_PWA_DEV=1 npm run dev`
+      devOptions: { enabled: enablePwaInDev }
     })
   ],
   server: {
     port: 3000,
-    open: true
+    open: !isAutomatedRun,
+    proxy: {
+      '/api': {
+        target: 'https://wemp.issks.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, '')
+      }
+    }
   },
   build: {
     outDir: 'dist',
     sourcemap: true
-  },
-  resolve: {
-    alias: {
-      '@': '/src'
-    }
   }
 })

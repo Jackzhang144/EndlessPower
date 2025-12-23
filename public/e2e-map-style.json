@@ -1,0 +1,15 @@
+{
+  "version": 8,
+  "name": "EndlessPower E2E",
+  "sources": {},
+  "layers": [
+    {
+      "id": "background",
+      "type": "background",
+      "paint": {
+        "background-color": "#0b0f18"
+      }
+    }
+  ]
+}
+

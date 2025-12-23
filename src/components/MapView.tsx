@@ -1,711 +1,523 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { MapContainer, TileLayer, Marker, Tooltip, useMapEvents } from 'react-leaflet'
-import { useSEO } from '../hooks/useSEO'
-import L from 'leaflet'
-import { Station } from '../types/station'
+import maplibregl from 'maplibre-gl'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Button, Card } from '@heroui/react'
 import { useStationStore } from '../store/stationStore'
-import { useThemeStore } from '../store/themeStore'
 import { useSettingsStore } from '../store/settingsStore'
+import { useThemeStore } from '../store/themeStore'
+import type { Station } from '../types/station'
 import { getColorForAvailability } from '../utils/api'
-import { getVersionInfo } from '../utils/version'
-import { HardcodedStationLocation, HARDCODED_STATION_LOCATIONS } from '../data/stationLocations'
 import SearchBar from './SearchBar'
-import StationDetailPanel from './StationDetailPanel'
+import StationDetailModal from './StationDetailModal'
 import LoadingSpinner from './LoadingSpinner'
-import DevPanel from './DevPanel'
-import DraggableStationMarkerUniversal from './DraggableStationMarkerUniversal'
-import RefreshOutlined from '@mui/icons-material/RefreshOutlined'
-import QrCodeScannerOutlined from '@mui/icons-material/QrCodeScannerOutlined'
-import DeveloperModeOutlined from '@mui/icons-material/DeveloperModeOutlined'
-import { TransformWrapper, TransformComponent, useControls } from 'react-zoom-pan-pinch'
+import CampusMapModal from './CampusMapModal'
+import { CampusIcon, QrCodeIcon, RefreshIcon } from './icons'
 
-const MAP_CENTER: [number, number] = [30.754365, 103.936107]
+// 默认位置（WGS84）：由旧版高德(GCJ-02)中心点换算得到
+const MAP_CENTER: [number, number] = [30.757064, 103.933993]
+const CARTO_STYLE_URLS = {
+  positron: 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+  voyager: 'https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json',
+  'positron-nolabels': 'https://basemaps.cartocdn.com/gl/positron-nolabels-gl-style/style.json',
+  'voyager-nolabels': 'https://basemaps.cartocdn.com/gl/voyager-nolabels-gl-style/style.json',
+  'dark-matter': 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+  'dark-matter-nolabels': 'https://basemaps.cartocdn.com/gl/dark-matter-nolabels-gl-style/style.json'
+} as const
+const MAP_STYLE_OVERRIDE = (import.meta.env.VITE_MAP_STYLE as string | undefined) ?? ''
 
-// 缩放控制组件（只在桌面端显示）
-const ZoomControls: React.FC = () => {
-  const { zoomIn, zoomOut, resetTransform } = useControls()
-  const [currentZoom, setCurrentZoom] = useState(1)
-  
-  // 监听缩放变化，通过定时器同步状态
-  useEffect(() => {
-    const interval = setInterval(() => {
-      // 通过DOM元素获取当前变换状态
-      const transformElement = document.querySelector('.react-transform-component') as HTMLElement
-      if (transformElement) {
-        const transform = transformElement.style.transform
-        const scaleMatch = transform.match(/scale\(([^)]+)\)/)
-        if (scaleMatch) {
-          const scale = parseFloat(scaleMatch[1])
-          if (Math.abs(scale - currentZoom) > 0.01) {
-            setCurrentZoom(Math.round(scale * 10) / 10) // 四舍五入到一位小数
-          }
-        }
-      }
-    }, 100)
-    
-    return () => clearInterval(interval)
-  }, [currentZoom])
-  
-  const handleZoomChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const newZoom = parseFloat(event.target.value)
-    setCurrentZoom(newZoom)
-    
-    // 计算需要的缩放步骤
-    const diff = newZoom - currentZoom
-    if (Math.abs(diff) > 0.1) {
-      const steps = Math.round(Math.abs(diff) / 0.2)
-      const stepDelay = 50
-      
-      if (diff > 0) {
-        // 放大
-        for (let i = 0; i < steps; i++) {
-          setTimeout(() => zoomIn(0.2, stepDelay), i * stepDelay)
-        }
-      } else {
-        // 缩小  
-        for (let i = 0; i < steps; i++) {
-          setTimeout(() => zoomOut(0.2, stepDelay), i * stepDelay)
-        }
-      }
+const CARTO_CANONICAL_HOST = 'basemaps.cartocdn.com'
+const CARTO_TILE_HOST_RE = /^tiles(?:-[a-d])?\.basemaps\.cartocdn\.com$/i
+const MAP_STATE_STORAGE_KEY = 'map-view-state-v1'
+
+type MapViewState = {
+  center: [number, number] // [lng, lat]
+  zoom: number
+  pitch: number
+  bearing: number
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function readMapViewState(): MapViewState | null {
+  try {
+    const raw = localStorage.getItem(MAP_STATE_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<MapViewState>
+    const center = parsed.center
+    if (!Array.isArray(center) || center.length !== 2) return null
+    const [lng, lat] = center
+    if (!isFiniteNumber(lng) || !isFiniteNumber(lat)) return null
+    if (!isFiniteNumber(parsed.zoom) || !isFiniteNumber(parsed.pitch) || !isFiniteNumber(parsed.bearing)) return null
+
+    return {
+      center: [lng, lat],
+      zoom: Math.min(22, Math.max(0, parsed.zoom)),
+      pitch: Math.min(85, Math.max(0, parsed.pitch)),
+      bearing: ((parsed.bearing + 180) % 360) - 180
     }
+  } catch {
+    return null
   }
-  
-  const handleZoomIn = () => {
-    zoomIn(0.2, 200)
+}
+
+function writeMapViewState(state: MapViewState) {
+  try {
+    localStorage.setItem(MAP_STATE_STORAGE_KEY, JSON.stringify(state))
+  } catch {
+    // ignore
   }
-  
-  const handleZoomOut = () => {
-    zoomOut(0.2, 200)
+}
+
+function snapshotMapViewState(map: maplibregl.Map): MapViewState {
+  const center = map.getCenter()
+  return {
+    center: [center.lng, center.lat],
+    zoom: map.getZoom(),
+    pitch: map.getPitch(),
+    bearing: map.getBearing()
   }
-  
-  const handleReset = () => {
-    setCurrentZoom(1)
-    resetTransform(200)
+}
+
+function rewriteCartoUrl(url: string) {
+  try {
+    const parsed = new URL(url, window.location.href)
+    if (!CARTO_TILE_HOST_RE.test(parsed.hostname)) return url
+    parsed.hostname = CARTO_CANONICAL_HOST
+    return parsed.toString()
+  } catch {
+    return url
   }
-  
-  return (
-    <div className="absolute bottom-4 left-4 z-[2001] hidden md:flex items-center gap-3 bg-black bg-opacity-60 backdrop-blur-sm rounded-full px-4 py-2">
-      {/* 缩小按钮 */}
-      <button
-        onClick={handleZoomOut}
-        className="text-white hover:text-gray-300 transition-colors p-1"
-        aria-label="缩小"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-        </svg>
-      </button>
-      
-      {/* 缩放滑块 */}
-      <div className="flex items-center gap-2">
-        <span className="text-white text-xs font-mono">{Math.round(currentZoom * 100)}%</span>
-        <input
-          type="range"
-          min="1"
-          max="5"
-          step="0.1"
-          value={currentZoom}
-          onChange={handleZoomChange}
-          className="w-24 h-1 bg-gray-600 rounded-lg appearance-none cursor-pointer zoom-slider"
-          style={{
-            background: `linear-gradient(to right, #3b82f6 0%, #3b82f6 ${((currentZoom - 1) / 4) * 100}%, #4b5563 ${((currentZoom - 1) / 4) * 100}%, #4b5563 100%)`
-          }}
-        />
-      </div>
-      
-      {/* 放大按钮 */}
-      <button
-        onClick={handleZoomIn}
-        className="text-white hover:text-gray-300 transition-colors p-1"
-        aria-label="放大"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-        </svg>
-      </button>
-      
-      {/* 重置按钮 */}
-      <div className="w-px h-4 bg-gray-600 mx-1"></div>
-      <button
-        onClick={handleReset}
-        className="text-white hover:text-gray-300 transition-colors p-1"
-        aria-label="重置缩放"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-        </svg>
-      </button>
-    </div>
+}
+
+function enable3DBuildings(map: maplibregl.Map, isDark: boolean) {
+  if (!map.isStyleLoaded()) return
+  if (!map.getSource('carto')) return
+
+  const heightExpr: unknown = ['coalesce', ['get', 'render_height'], 0]
+  const fallbackColor: unknown = isDark
+    ? [
+        'interpolate',
+        ['linear'],
+        heightExpr,
+        0,
+        ['to-color', '#4b5563'],
+        12,
+        ['to-color', '#374151'],
+        30,
+        ['to-color', '#1f2937'],
+        60,
+        ['to-color', '#111827']
+      ]
+    : [
+        'interpolate',
+        ['linear'],
+        heightExpr,
+        0,
+        ['to-color', '#d1d5db'],
+        10,
+        ['to-color', '#c0c6ce'],
+        28,
+        ['to-color', '#9ca3af'],
+        60,
+        ['to-color', '#6b7280']
+      ]
+
+  // 更显眼：优先使用数据自带 colour；否则按高度做轻微渐变，避免“整片一块灰”
+  const colorExpr: unknown = ['to-color', ['get', 'colour'], fallbackColor]
+  const opacity = isDark ? 0.82 : 1
+  const verticalGradient = true
+
+  if (map.getLayer('3d-buildings')) {
+    map.setPaintProperty('3d-buildings', 'fill-extrusion-color', colorExpr as any)
+    map.setPaintProperty('3d-buildings', 'fill-extrusion-opacity', opacity as any)
+    map.setPaintProperty('3d-buildings', 'fill-extrusion-vertical-gradient', verticalGradient as any)
+    return
+  }
+
+  const layers = map.getStyle().layers ?? []
+  const lastBuildingLayerIndex = (() => {
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const layer = layers[i] as any
+      if (layer?.source === 'carto' && layer?.['source-layer'] === 'building') return i
+    }
+    return -1
+  })()
+
+  const labelLayerId =
+    layers
+      .slice(lastBuildingLayerIndex >= 0 ? lastBuildingLayerIndex + 1 : 0)
+      .find((l) => l.type === 'symbol' && (l.layout as any)?.['text-field'])?.id ??
+    layers.find((l) => l.type === 'symbol' && (l.layout as any)?.['text-field'])?.id
+
+  map.addLayer(
+    {
+      id: '3d-buildings',
+      source: 'carto',
+      'source-layer': 'building',
+      type: 'fill-extrusion',
+      minzoom: 12,
+      filter: ['all', ['!=', ['coalesce', ['get', 'hide_3d'], false], true]],
+      paint: {
+        'fill-extrusion-color': colorExpr as any,
+        'fill-extrusion-opacity': opacity,
+        'fill-extrusion-height': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          12,
+          0,
+          13,
+          ['case', ['has', 'render_height'], ['get', 'render_height'], 6]
+        ],
+        'fill-extrusion-base': [
+          'interpolate',
+          ['linear'],
+          ['zoom'],
+          12,
+          0,
+          13,
+          ['case', ['has', 'render_min_height'], ['get', 'render_min_height'], 0]
+        ],
+        'fill-extrusion-vertical-gradient': verticalGradient
+      }
+    } as any,
+    labelLayerId
   )
 }
 
-const MapView: React.FC = () => {
-  // SEO优化
-  useSEO('home')
-  
+function getStationMarkerColor(station: Station) {
+  const free = station.freeNum
+  const total = station.switchType
+  if (free == null || total == null || total === 0) return '#9ca3af'
+  return getColorForAvailability(free / total)
+}
+
+export default function MapView() {
+  const mapContainerRef = useRef<HTMLDivElement | null>(null)
+  const mapRef = useRef<maplibregl.Map | null>(null)
+  const stationMarkersRef = useRef<maplibregl.Marker[]>([])
+  const userMarkerRef = useRef<maplibregl.Marker | null>(null)
+  const restoredViewRef = useRef(false)
+
+  const [mapError, setMapError] = useState<string | null>(null)
   const [selectedStation, setSelectedStation] = useState<Station | null>(null)
-  const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
+  const [campusOpen, setCampusOpen] = useState(false)
   const [isLocating, setIsLocating] = useState(false)
-  const mapRef = useRef<L.Map | null>(null)
-  
-  // 开发模式相关状态
-  const [isDevMode, setIsDevMode] = useState(false)
-  const [isDragMode, setIsDragMode] = useState(false)
-  const [isCoordMode, setIsCoordMode] = useState(false)
-  const [selectedCoords, setSelectedCoords] = useState<[number, number] | null>(null)
-  const [hardcodedStations, setHardcodedStations] = useState<HardcodedStationLocation[]>(HARDCODED_STATION_LOCATIONS)
-  const [showMapModal, setShowMapModal] = useState(false)
-  
-  // 记录用户校准的位置 (stationId -> {lat, lng})
-  const [calibratedPositions, setCalibratedPositions] = useState<Record<number, { lat: number; lng: number }>>({})
-  
-  const versionInfo = getVersionInfo()
-  
-  const { 
-    getFilteredStations, 
-    isLoading, 
-    refreshStations, 
-    canRefresh,
-    setUserLocation: setStoreUserLocation 
-  } = useStationStore()
-  
+
   const { isDark } = useThemeStore()
-  const { showUnavailableStations, autoRefresh, refreshInterval } = useSettingsStore()
-  
+  const { showUnavailableStations, autoRefresh, refreshInterval, baseMapStyle } = useSettingsStore()
+  const {
+    stations: allStations,
+    getFilteredStations,
+    isLoading,
+    isRefreshing,
+    refreshStations,
+    canRefresh,
+    userLocation,
+    setUserLocation: setStoreUserLocation
+  } = useStationStore()
+
   const stations = getFilteredStations()
+  const hideMapControls = Boolean(selectedStation || campusOpen)
+  const hasAnyStations = allStations.length > 0
+
+  const displayStations = useMemo(() => {
+    if (showUnavailableStations) return stations
+    return stations.filter((s) => (s.freeNum ?? 0) > 0)
+  }, [stations, showUnavailableStations])
+
+  const styleUrl = useMemo(() => {
+    if (MAP_STYLE_OVERRIDE) return MAP_STYLE_OVERRIDE
+    if (baseMapStyle && baseMapStyle !== 'auto') return CARTO_STYLE_URLS[baseMapStyle]
+    return isDark ? CARTO_STYLE_URLS['dark-matter'] : CARTO_STYLE_URLS.voyager
+  }, [baseMapStyle, isDark])
+
+  const createMap = useCallback(() => {
+    if (!mapContainerRef.current) return
+    if (mapRef.current) return
+
+    const savedView = readMapViewState()
+    restoredViewRef.current = Boolean(savedView)
+
+    const map = new maplibregl.Map({
+      container: mapContainerRef.current,
+      style: styleUrl,
+      center: savedView?.center ?? [MAP_CENTER[1], MAP_CENTER[0]],
+      zoom: savedView?.zoom ?? 16,
+      pitch: savedView?.pitch ?? 60,
+      bearing: savedView?.bearing ?? -20,
+      maxPitch: 85,
+      attributionControl: false,
+      transformRequest: (url, resourceType) => {
+        const rewritten = rewriteCartoUrl(url)
+        if (rewritten === url) return { url }
+        return { url: rewritten }
+      },
+      // maplibre 支持 antialias，但类型定义未暴露
+      antialias: true
+    } as any)
+
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
+    map.addControl(new maplibregl.ScaleControl({ maxWidth: 100, unit: 'metric' }), 'bottom-left')
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), 'bottom-left')
+
+    map.on('load', () => {
+      setMapError(null)
+      enable3DBuildings(map, isDark)
+    })
+
+    map.on('error', (event) => {
+      const message = event?.error?.message || '地图资源加载失败'
+      setMapError(message)
+      if (import.meta.env.DEV) console.error('MapLibre error', event)
+    })
+
+    let saveTimer: number | null = null
+    const scheduleSave = () => {
+      if (saveTimer) window.clearTimeout(saveTimer)
+      saveTimer = window.setTimeout(() => writeMapViewState(snapshotMapViewState(map)), 250)
+    }
+
+    map.on('moveend', scheduleSave)
+    map.on('rotateend', scheduleSave)
+    map.on('pitchend', scheduleSave)
+    map.on('zoomend', scheduleSave)
+
+    mapRef.current = map
+  }, [isDark, styleUrl])
 
   useEffect(() => {
-    // 尝试获取用户位置
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude } = position.coords
-          const location: [number, number] = [latitude, longitude]
-          setUserLocation(location)
-          setStoreUserLocation(location)
-          
-          // 将地图中心移动到用户位置
-          if (mapRef.current) {
-            mapRef.current.setView(location, 16)
-          }
-        },
-        (error) => {
-          if (import.meta.env.DEV) console.warn('Failed to get user location:', error)
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 60000
-        }
-      )
+    createMap()
+    return () => {
+      const map = mapRef.current
+      if (map) writeMapViewState(snapshotMapViewState(map))
+      stationMarkersRef.current.forEach((m) => m.remove())
+      stationMarkersRef.current = []
+      userMarkerRef.current?.remove()
+      userMarkerRef.current = null
+      mapRef.current?.remove()
+      mapRef.current = null
     }
-  }, [setStoreUserLocation])
+  }, [createMap])
 
-  // 自动刷新功能
+  // 切换主题时更新地图样式（并重挂 3D 建筑层）
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    map.setStyle(styleUrl)
+    map.once('style.load', () => enable3DBuildings(map, isDark))
+  }, [isDark, styleUrl])
+
+  // 主题变化但底图不变（例如使用 VITE_MAP_STYLE 覆盖）时，更新 3D 建筑着色
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (!map.getLayer('3d-buildings')) return
+    enable3DBuildings(map, isDark)
+  }, [isDark])
+
+  // 自动刷新
   useEffect(() => {
     if (!autoRefresh) return
+    const id = window.setInterval(async () => {
+      if (!canRefresh()) return
+      await refreshStations(userLocation?.[0], userLocation?.[1], { showLoading: false })
+    }, refreshInterval * 1000)
+    return () => window.clearInterval(id)
+  }, [autoRefresh, canRefresh, refreshInterval, refreshStations, userLocation])
 
-    const intervalId = setInterval(async () => {
-      if (canRefresh()) {
-        const lat = userLocation?.[0]
-        const lng = userLocation?.[1]
-        await refreshStations(lat, lng)
-      }
-    }, refreshInterval * 1000) // 转换为毫秒
+  // 尝试获取用户位置（用于居中与刷新）
+  useEffect(() => {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords
+        const loc: [number, number] = [latitude, longitude]
+        setStoreUserLocation(loc)
+      },
+      () => {
+        // ignore
+      },
+      { enableHighAccuracy: true, timeout: 10_000, maximumAge: 60_000 }
+    )
+  }, [setStoreUserLocation])
 
-    return () => clearInterval(intervalId)
-  }, [autoRefresh, refreshInterval, userLocation, canRefresh, refreshStations])
+  // 地图跟随用户位置
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    if (!userLocation) return
+    if (restoredViewRef.current) return
+    map.easeTo({ center: [userLocation[1], userLocation[0]], zoom: 16, duration: 800 })
+    restoredViewRef.current = true
+  }, [userLocation])
 
-  const createMarkerIcon = (color: string) => {
-    return L.divIcon({
-      className: 'leaflet-div-icon',
-      html: `<div class="map-marker" style="background-color: ${color};"></div>`,
-      iconSize: [20, 20],
-      iconAnchor: [10, 10]
+  // 渲染用户位置 Marker
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    if (!userLocation) {
+      userMarkerRef.current?.remove()
+      userMarkerRef.current = null
+      return
+    }
+
+    const el = document.createElement('div')
+    el.className = 'user-marker'
+    const marker = userMarkerRef.current ?? new maplibregl.Marker({ element: el, anchor: 'center' })
+    marker.setLngLat([userLocation[1], userLocation[0]]).addTo(map)
+    userMarkerRef.current = marker
+  }, [userLocation])
+
+  // 渲染充电站 Markers
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+
+    stationMarkersRef.current.forEach((m) => m.remove())
+    stationMarkersRef.current = []
+
+    stationMarkersRef.current = displayStations.map((station) => {
+      const el = document.createElement('button')
+      el.type = 'button'
+      el.className = 'station-marker'
+      el.style.backgroundColor = getStationMarkerColor(station)
+      el.setAttribute('aria-label', station.stationName)
+      el.addEventListener('click', () => setSelectedStation(station))
+      return new maplibregl.Marker({ element: el, anchor: 'center' })
+        .setLngLat([station.longitude, station.latitude])
+        .addTo(map)
     })
-  }
-
-  const createUserLocationIcon = () => {
-    return L.divIcon({
-      className: 'user-location-marker',
-      html: '<div style="background-color: #3B82F6; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 10px rgba(0,0,0,0.3);"></div>',
-      iconSize: [22, 22],
-      iconAnchor: [11, 11]
-    })
-  }
+  }, [displayStations])
 
   const handleRefresh = async () => {
     if (!canRefresh()) return
-    
-    // 如果支持地理位置且未在定位中，先获取用户位置
-    if (navigator.geolocation && !isLocating) {
-      setIsLocating(true)
-      
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          try {
-            const { latitude, longitude } = position.coords
-            const location: [number, number] = [latitude, longitude]
-            
-            setUserLocation(location)
-            setStoreUserLocation(location)
-            
-            // 移动地图到用户位置
-            if (mapRef.current) {
-              mapRef.current.setView(location, 16)
-            }
-            
-            // 刷新该位置的充电站
-            await refreshStations(latitude, longitude)
-          } catch {
-            // 如果刷新失败，使用原有位置或默认位置
-            const lat = userLocation?.[0]
-            const lng = userLocation?.[1]
-            await refreshStations(lat, lng)
-          } finally {
-            setIsLocating(false)
-          }
-        },
-        async (_error) => {
-          setIsLocating(false)
-          // 定位失败时，使用原有位置刷新，不显示错误（静默处理）
-          const lat = userLocation?.[0]
-          const lng = userLocation?.[1]
-          await refreshStations(lat, lng)
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 5000, // 减少超时时间
-          maximumAge: 60000
-        }
-      )
-    } else {
-      // 不支持定位或正在定位中，直接刷新
-      const lat = userLocation?.[0]
-      const lng = userLocation?.[1]
-      await refreshStations(lat, lng)
-    }
-  }
-
-
-  const handleWeChatScan = () => {
+    setIsLocating(true)
     try {
-      // 尝试打开微信扫一扫
-      window.location.href = 'weixin://scanqrcode'
-    } catch (error) {
-      console.warn('无法打开微信扫一扫，可能是设备不支持或未安装微信', error)
-    }
-  }
-
-  // 开发模式相关函数
-  const handleToggleDevMode = useCallback(() => {
-    setIsDevMode(prev => !prev)
-    if (isDevMode) {
-      // 关闭开发模式时重置所有状态
-      setIsDragMode(false)
-      setIsCoordMode(false)
-      setSelectedCoords(null)
-    }
-  }, [isDevMode])
-
-  const handleToggleDragMode = useCallback(() => {
-    setIsDragMode(prev => !prev)
-    if (isCoordMode) {
-      setIsCoordMode(false)
-    }
-  }, [isCoordMode])
-
-  const handleToggleCoordMode = useCallback(() => {
-    setIsCoordMode(prev => !prev)
-    if (isDragMode) {
-      setIsDragMode(false)
-    }
-  }, [isDragMode])
-
-  const handleToggleMapModal = useCallback(() => {
-    setShowMapModal(prev => !prev)
-  }, [])
-
-  const handleClearCoords = useCallback(() => {
-    setSelectedCoords(null)
-  }, [])
-
-  // 处理充电站位置校准（包括API和硬编码的充电站）
-  const handleUpdateStation = useCallback((stationId: number, latitude: number, longitude: number) => {
-    // 检查是否是硬编码充电站
-    const isHardcoded = hardcodedStations.some(station => station.stationId === stationId)
-    
-    if (isHardcoded) {
-      // 更新硬编码充电站
-      setHardcodedStations(prev => 
-        prev.map(station => 
-          station.stationId === stationId 
-            ? { ...station, latitude, longitude }
-            : station
-        )
-      )
-    } else {
-      // 记录API充电站的校准位置
-      setCalibratedPositions(prev => ({
-        ...prev,
-        [stationId]: { lat: latitude, lng: longitude }
-      }))
-    }
-  }, [hardcodedStations])
-
-  // 获取充电站的实际显示位置（优先使用校准位置）
-  const getStationPosition = useCallback((station: Station): [number, number] => {
-    const calibrated = calibratedPositions[station.stationId]
-    if (calibrated) {
-      return [calibrated.lat, calibrated.lng]
-    }
-    return [station.latitude, station.longitude]
-  }, [calibratedPositions])
-
-  // 检查充电站是否被校准过
-  const isStationCalibrated = useCallback((stationId: number): boolean => {
-    return stationId in calibratedPositions || hardcodedStations.some(s => s.stationId === stationId)
-  }, [calibratedPositions, hardcodedStations])
-
-  const handleAddStation = useCallback((newStation: Omit<HardcodedStationLocation, 'stationId'>) => {
-    const maxId = Math.max(...hardcodedStations.map(s => s.stationId), 0)
-    const stationWithId: HardcodedStationLocation = {
-      ...newStation,
-      stationId: maxId + 1
-    }
-    setHardcodedStations(prev => [...prev, stationWithId])
-  }, [hardcodedStations])
-
-  // 地图点击事件处理组件
-  const MapClickHandler = () => {
-    useMapEvents({
-      click: (e) => {
-        if (isCoordMode) {
-          const { lat, lng } = e.latlng
-          setSelectedCoords([lat, lng])
-        }
+      if (navigator.geolocation) {
+        await new Promise<void>((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            async (pos) => {
+              const loc: [number, number] = [pos.coords.latitude, pos.coords.longitude]
+              setStoreUserLocation(loc)
+              mapRef.current?.easeTo({ center: [loc[1], loc[0]], zoom: 16, duration: 800 })
+              await refreshStations(loc[0], loc[1])
+              resolve()
+            },
+            async () => {
+              await refreshStations(userLocation?.[0], userLocation?.[1])
+              resolve()
+            },
+            { enableHighAccuracy: true, timeout: 8000, maximumAge: 60_000 }
+          )
+        })
+      } else {
+        await refreshStations(userLocation?.[0], userLocation?.[1])
       }
-    })
-    return null
-  }
-
-  const getStationMarkerColor = (station: Station) => {
-    if (!station.freeNum || !station.switchType || station.switchType === 0) {
-      return '#9ca3af' // gray for unknown status
+    } finally {
+      setIsLocating(false)
     }
-    
-    const ratio = station.freeNum / station.switchType
-    return getColorForAvailability(ratio)
   }
 
-  // 判断充电桩是否有可用插座
-  const hasAvailableOutlets = (station: Station) => {
-    return station.freeNum && station.freeNum > 0
-  }
-
-
-  // 根据设置过滤充电桩 - 使用 useMemo 确保响应式更新
-  const displayStations = useMemo(() => {
-    if (showUnavailableStations) {
-      return stations // 显示所有充电桩
-    } else {
-      return stations.filter(hasAvailableOutlets) // 只显示有可用插座的充电桩
-    }
-  }, [stations, showUnavailableStations])
-
-  // 处理搜索框选择充电桩
-  const handleStationSelectFromSearch = (station: Station) => {
-    // 定位地图到选择的充电桩
-    if (mapRef.current) {
-      mapRef.current.setView([station.latitude, station.longitude], 18, {
-        animate: true,
-        duration: 1
-      })
-    }
-    // 可选：同时打开该充电桩的详情面板
-    setSelectedStation(station)
-  }
+  const refreshReady = canRefresh()
+  const refreshDisabled = isLoading || isRefreshing || isLocating || !refreshReady
+  const showLoadingOverlay = isLocating || (isLoading && !hasAnyStations)
 
   return (
-    <div className="w-full h-full relative">
-      <SearchBar onStationSelect={handleStationSelectFromSearch} />
-      
-      {/* Map Container */}
-      <MapContainer
-        center={userLocation || MAP_CENTER}
-        zoom={16}
-        className="w-full h-full"
-        zoomControl={false}
-        attributionControl={false}
-        ref={mapRef}
-      >
-        <TileLayer
-          url="https://wprd0{s}.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=7&x={x}&y={y}&z={z}"
-          subdomains={['1', '2', '3', '4']}
-          attribution="&copy; 高德地图"
-        />
-        
-        {/* 地图点击事件处理 */}
-        <MapClickHandler />
-        
-        {/* Station Markers - 在开发模式下使用可拖拽标记，普通模式下使用常规标记 */}
-        {isDevMode ? (
-          // 开发模式：所有充电站都可拖拽
-          displayStations.map((station) => (
-            <DraggableStationMarkerUniversal
-              key={station.stationId}
-              station={station}
-              position={getStationPosition(station)}
-              onDragEnd={handleUpdateStation}
-              isDragMode={isDragMode}
-              isCalibrated={isStationCalibrated(station.stationId)}
-              onClick={() => setSelectedStation(station)}
-            />
-          ))
-        ) : (
-          // 普通模式：使用常规标记
-          displayStations.map((station) => (
-            <Marker
-              key={station.stationId}
-              position={getStationPosition(station)}
-              icon={createMarkerIcon(getStationMarkerColor(station))}
-              eventHandlers={{
-                click: () => setSelectedStation(station)
-              }}
-            >
-              <Tooltip
-                permanent={false}
-                direction="top"
-                offset={[0, -12]}
-                className="station-tooltip"
-              >
-                {station.stationName}
-              </Tooltip>
-            </Marker>
-          ))
-        )}
-        
-        {/* 硬编码充电站标记 (开发模式且不在显示列表中) */}
-        {isDevMode && hardcodedStations
-          .filter(hardStation => !displayStations.some(station => station.stationId === hardStation.stationId))
-          .map((station) => (
-          <DraggableStationMarkerUniversal
-            key={`hardcoded-${station.stationId}`}
-            station={{
-              stationId: station.stationId,
-              stationName: station.stationName,
-              latitude: station.latitude,
-              longitude: station.longitude,
-              address: station.address || '',
-              freeNum: 0,
-              switchType: 1
-            }}
-            position={[station.latitude, station.longitude]}
-            onDragEnd={handleUpdateStation}
-            isDragMode={isDragMode}
-            isCalibrated={true}
-          />
-        ))}
-        
-        {/* 选中坐标标记 */}
-        {selectedCoords && (
-          <Marker
-            position={selectedCoords}
-            icon={L.divIcon({
-              className: 'selected-coords-marker',
-              html: `
-                <div style="
-                  background-color: #ef4444; 
-                  width: 20px; 
-                  height: 20px; 
-                  border-radius: 50%; 
-                  border: 3px solid white; 
-                  box-shadow: 0 2px 10px rgba(0,0,0,0.4);
-                  animation: pulse 2s infinite;
-                "></div>
-              `,
-              iconSize: [26, 26],
-              iconAnchor: [13, 13]
-            })}
-          >
-            <Tooltip permanent={true} direction="top" offset={[0, -15]}>
-              <div className="text-center">
-                <div className="font-medium text-red-600">选中坐标</div>
-                <div className="text-xs">
-                  {selectedCoords[0].toFixed(6)}, {selectedCoords[1].toFixed(6)}
-                </div>
+    <div className="map-view" data-testid="map-view">
+      <div className="map-canvas" ref={mapContainerRef} data-testid="map-canvas" />
+
+      {mapError && (
+        <div className="toast" role="alert" aria-live="polite">
+          <Card className="toast-card">
+            <Card.Content className="toast-content">
+              <div className="toast-text">
+                <div className="toast-title">地图加载失败</div>
+                <div className="toast-sub">{mapError}</div>
               </div>
-            </Tooltip>
-          </Marker>
-        )}
-        
-        {/* User Location Marker */}
-        {userLocation && (
-          <Marker
-            position={userLocation}
-            icon={createUserLocationIcon()}
-          />
-        )}
-      </MapContainer>
-
-      {/* 暗色模式覆盖层 */}
-      {isDark && (
-        <div 
-          className="absolute inset-0 pointer-events-none z-[401] transition-opacity duration-300"
-          style={{
-            background: 'rgba(0, 0, 0, 0.4)',
-            mixBlendMode: 'multiply'
-          }}
-        />
-      )}
-
-      {/* Control Buttons - 响应式布局优化 + PWA沉浸式支持 (在卡片打开时隐藏) */}
-      {!selectedStation && (
-        <div className="absolute left-1/2 transform -translate-x-1/2 md:bottom-6 md:right-6 md:left-auto md:transform-none z-[999] flex gap-2 md:gap-3 bg-white/10 dark:bg-gray-900/10 backdrop-blur-sm rounded-full p-2 md:p-0 md:bg-transparent md:backdrop-blur-none ios-safe-bottom" style={{ bottom: 'max(1rem, env(safe-area-inset-bottom))' }}>
-        {/* 开发模式按钮 (仅在开发环境显示) */}
-        {versionInfo.isDevelopment && (
-          <button
-            onClick={handleToggleDevMode}
-            className={`p-4 md:p-3 rounded-full shadow-lg hover:scale-105 active:scale-95 transition-all min-w-[60px] min-h-[60px] md:min-w-[56px] md:min-h-[56px] flex items-center justify-center ${
-              isDevMode
-                ? 'bg-orange-500 text-white hover:bg-orange-600'
-                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700'
-            }`}
-            aria-label={isDevMode ? "关闭开发模式" : "开启开发模式"}
-            type="button"
-          >
-            <DeveloperModeOutlined className="h-6 w-6" />
-          </button>
-        )}
-
-        <button
-          onClick={handleWeChatScan}
-          className="bg-white dark:bg-gray-800 text-green-600 dark:text-green-400 p-4 md:p-3 rounded-full shadow-lg hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-105 active:scale-95 transition-all min-w-[60px] min-h-[60px] md:min-w-[56px] md:min-h-[56px] flex items-center justify-center"
-          aria-label="微信扫一扫"
-          type="button"
-        >
-          <QrCodeScannerOutlined className="h-6 w-6" />
-        </button>
-
-        {/* 查看地图按钮 */}
-        <button
-          onClick={handleToggleMapModal}
-          className="bg-white dark:bg-gray-800 text-blue-600 dark:text-blue-400 p-4 md:p-3 rounded-full shadow-lg hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-105 active:scale-95 transition-all min-w-[60px] min-h-[60px] md:min-w-[56px] md:min-h-[56px] flex items-center justify-center"
-          aria-label="查看校园地图"
-          type="button"
-        >
-          <svg className="h-6 w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-          </svg>
-        </button>
-
-        <button
-          onClick={handleRefresh}
-          disabled={isLoading || isLocating}
-          className="bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 p-4 md:p-3 rounded-full shadow-lg hover:bg-gray-100 dark:hover:bg-gray-700 hover:scale-105 active:scale-95 transition-all disabled:opacity-50 min-w-[60px] min-h-[60px] md:min-w-[56px] md:min-h-[56px] flex items-center justify-center"
-          aria-label={isLoading || isLocating ? "刷新中..." : "刷新并定位"}
-          type="button"
-        >
-          <RefreshOutlined className="h-6 w-6" />
-        </button>
+              <div className="toast-actions">
+                <Button
+                  variant="primary"
+                  onPress={() => {
+                    setMapError(null)
+                    mapRef.current?.setStyle(styleUrl)
+                  }}
+                >
+                  重试
+                </Button>
+                <Button variant="secondary" onPress={() => setMapError(null)}>
+                  关闭
+                </Button>
+              </div>
+            </Card.Content>
+          </Card>
         </div>
       )}
 
-      {/* Loading Overlay */}
-      {isLoading && (
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[999] bg-white/80 dark:bg-gray-800/80 p-4 rounded-lg shadow-xl backdrop-blur-sm">
-          <LoadingSpinner text="刷新状态..." />
-        </div>
-      )}
-
-      {/* Station Detail Panel */}
-      <StationDetailPanel
-        station={selectedStation}
-        onClose={() => setSelectedStation(null)}
-      />
-
-      {/* 开发者面板 */}
-      {versionInfo.isDevelopment && (
-        <DevPanel
-          isOpen={isDevMode}
-          onClose={() => setIsDevMode(false)}
-          isDragMode={isDragMode}
-          onToggleDragMode={handleToggleDragMode}
-          isCoordMode={isCoordMode}
-          onToggleCoordMode={handleToggleCoordMode}
-          selectedCoords={selectedCoords}
-          onClearCoords={handleClearCoords}
-          stations={hardcodedStations}
-          calibratedPositions={calibratedPositions}
-          allStations={stations.map(s => ({
-            stationId: s.stationId,
-            stationName: s.stationName,
-            latitude: s.latitude,
-            longitude: s.longitude
-          }))}
-          onUpdateStation={handleUpdateStation}
-          onAddStation={handleAddStation}
-        />
-      )}
-
-      {/* 地图模态框 */}
-      {showMapModal && (
-        <div 
-          className="fixed inset-0 z-[2000] bg-black bg-opacity-75 flex items-center justify-center p-4"
-          onClick={() => setShowMapModal(false)}
-        >
-          <div 
-            className="relative w-full max-w-4xl rounded-lg shadow-xl overflow-hidden flex items-center justify-center"
-            style={{ 
-              backgroundColor: '#484848', 
-              height: '85vh',
-              maxHeight: '85vh'
+      <div className="map-overlay">
+        <div className="map-top">
+          <SearchBar
+            onStationSelect={(station) => {
+              const map = mapRef.current
+              map?.easeTo({ center: [station.longitude, station.latitude], zoom: 18, duration: 800 })
+              setSelectedStation(station)
             }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              onClick={() => setShowMapModal(false)}
-              className="absolute top-4 right-4 z-[2001] bg-black bg-opacity-50 text-white rounded-full p-2 hover:bg-opacity-75 transition-all"
-              aria-label="关闭地图"
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-            
-            <TransformWrapper
-              initialScale={1}
-              minScale={1}
-              maxScale={5}
-              centerOnInit={true}
-              limitToBounds={false}
-              panning={{ disabled: false }}
-              pinch={{ disabled: false }}
-              doubleClick={{ disabled: false, mode: "zoomIn" }}
-              wheel={{ disabled: false }}
-              smooth={true}
-            >
-              <TransformComponent
-                wrapperClass="w-full h-full flex items-center justify-center"
-                contentClass="flex items-center justify-center"
-              >
-                <img 
-                  src="/map.jpg" 
-                  alt="校园地图" 
-                  className="max-w-full max-h-full object-contain select-none"
-                  draggable={false}
-                />
-              </TransformComponent>
-              
-              {/* 缩放控制条 - 锚定在窗口，只在桌面端显示 */}
-              <ZoomControls />
-            </TransformWrapper>
-          </div>
+          />
         </div>
-      )}
 
+        <div className={`map-controls ${hideMapControls ? 'is-hidden' : ''}`}>
+          <Button
+            isIconOnly
+            size="lg"
+            variant="secondary"
+            className="fab"
+            onPress={() => setCampusOpen(true)}
+            aria-label="校园地图"
+          >
+            <CampusIcon size={22} />
+          </Button>
+
+          <Button
+            isIconOnly
+            size="lg"
+            variant="secondary"
+            className="fab fab-scan"
+            onPress={() => {
+              try {
+                window.location.href = 'weixin://scanqrcode'
+              } catch {
+                // ignore
+              }
+            }}
+            aria-label="扫码"
+          >
+            <QrCodeIcon size={22} />
+          </Button>
+
+          <Button
+            isIconOnly
+            size="lg"
+            variant="primary"
+            className={`fab fab-refresh ${isLoading || isRefreshing || isLocating ? 'is-loading' : ''}`}
+            onPress={handleRefresh}
+            isDisabled={refreshDisabled}
+            aria-label={!refreshReady ? '刷新冷却中' : isLoading || isRefreshing || isLocating ? '刷新中' : '刷新并定位'}
+          >
+            <RefreshIcon size={22} />
+          </Button>
+        </div>
+
+        {showLoadingOverlay && (
+          <div className="map-center">
+            <LoadingSpinner label="刷新状态…" />
+          </div>
+        )}
+      </div>
+
+      <StationDetailModal station={selectedStation} isOpen={!!selectedStation} onClose={() => setSelectedStation(null)} />
+      <CampusMapModal isOpen={campusOpen} onClose={() => setCampusOpen(false)} />
     </div>
   )
 }
-
-export default MapView

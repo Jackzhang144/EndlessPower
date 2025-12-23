@@ -71,7 +71,7 @@ export const fetchRepoStats = async () => {
       throw new Error(`GitHub API error: ${response.status}`)
     }
 
-    const repo = await response.json()
+    const repo = (await response.json()) as any
     return {
       stars: repo.stargazers_count || 0,
       forks: repo.forks_count || 0,
@@ -92,4 +92,3 @@ export const fetchRepoStats = async () => {
     }
   }
 }
-

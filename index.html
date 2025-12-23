@@ -1,245 +1,31 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
-    
-    <!-- 基础SEO Meta标签 -->
-    <meta name="description" content="智能充电桩查询应用，实时显示附近充电站状态，支持充电桩导航、收藏管理，为新能源汽车用户提供便捷充电服务。" />
-    <meta name="keywords" content="充电桩,充电站,电动汽车充电,新能源汽车,充电桩查询,充电桩地图,闪开来电,EndlessPower,实时充电状态,附近充电桩,充电桩导航,EV充电" />
-    <meta name="author" content="EndlessPower Team" />
-    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
-    <meta name="language" content="zh-CN" />
-    <meta name="geo.region" content="CN" />
-    <meta name="geo.position" content="30.754365;103.936107" />
-    <meta name="geo.placename" content="成都" />
-    <meta name="ICBM" content="30.754365, 103.936107" />
-    
-    <!-- Open Graph / Facebook -->
-    <meta property="og:type" content="website" />
-    <meta property="og:title" content="充电桩地图查询 - EndlessPower" />
-    <meta property="og:description" content="智能充电桩查询应用，实时显示附近充电站状态，支持充电桩导航、收藏管理，为新能源汽车用户提供便捷充电服务。" />
-    <meta property="og:image" content="/pwa-512x512.svg" />
-    <meta property="og:url" content="https://endlesspower.karanocave.workers.dev" />
-    <meta property="og:site_name" content="EndlessPower" />
-    <meta property="og:locale" content="zh_CN" />
-    
-    <!-- Twitter Cards -->
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="充电桩地图查询 - EndlessPower" />
-    <meta name="twitter:description" content="智能充电桩查询应用，实时显示附近充电站状态，支持充电桩导航、收藏管理，为新能源汽车用户提供便捷充电服务。" />
-    <meta name="twitter:image" content="/pwa-512x512.svg" />
-    <meta name="twitter:site" content="@EndlessPower" />
-    <meta name="twitter:creator" content="@EndlessPower" />
-    
-    <!-- PWA Meta Tags -->
-    <meta name="theme-color" content="#3B82F6" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#1F2937" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="EndlessPower" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="application-name" content="EndlessPower" />
-    <meta name="msapplication-tap-highlight" content="no" />
-    
-    <!-- 安全和隐私 -->
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <meta name="referrer" content="origin-when-cross-origin" />
-    
-    <!-- Icons -->
+    <meta name="description" content="充电桩实时查询地图，支持收藏、搜索与插座监控。" />
+    <meta name="theme-color" content="#0b0f18" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.svg" />
     <link rel="mask-icon" href="/mask-icon.svg" color="#3B82F6" />
-    <link rel="canonical" href="https://endlesspower.karanocave.workers.dev" />
-    
-    <!-- DNS预解析优化 -->
-    <link rel="dns-prefetch" href="//fonts.googleapis.com" />
-    <link rel="dns-prefetch" href="//fonts.gstatic.com" />
-    <link rel="dns-prefetch" href="//unpkg.com" />
-    
-    <title>充电桩地图查询 - EndlessPower</title>
-    
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    
-    <!-- Leaflet CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
-    
-    <!-- 结构化数据 JSON-LD -->
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebApplication",
-      "name": "EndlessPower",
-      "description": "智能充电桩查询应用，实时显示附近充电站状态，支持充电桩导航、收藏管理，为新能源汽车用户提供便捷充电服务。",
-      "url": "https://endlesspower.karanocave.workers.dev",
-      "image": "https://endlesspower.karanocave.workers.dev/pwa-512x512.svg",
-      "author": {
-        "@type": "Organization",
-        "name": "EndlessPower Team"
-      },
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "CNY",
-        "description": "免费充电桩查询服务"
-      },
-      "applicationCategory": "LifestyleApplication",
-      "operatingSystem": "Web",
-      "browserRequirements": "Requires modern web browser with JavaScript enabled",
-      "softwareVersion": "1.2.0",
-      "dateCreated": "2024-01-01",
-      "dateModified": "2025-09-26",
-      "inLanguage": "zh-CN",
-      "isAccessibleForFree": true,
-      "keywords": "充电桩,充电站,电动汽车充电,新能源汽车,充电桩查询,充电桩地图,闪开来电,EndlessPower,实时充电状态,附近充电桩,充电桩导航,EV充电",
-      "mainEntity": {
-        "@type": "Service",
-        "name": "充电桩查询服务",
-        "description": "为电动汽车用户提供实时充电桩查询、导航和状态监控服务",
-        "provider": {
-          "@type": "Organization",
-          "name": "EndlessPower"
-        },
-        "areaServed": {
-          "@type": "Country",
-          "name": "China"
-        },
-        "serviceType": "充电桩查询",
-        "hasOfferCatalog": {
-          "@type": "OfferCatalog",
-          "name": "充电桩服务",
-          "itemListElement": [
-            {
-              "@type": "Offer",
-              "itemOffered": {
-                "@type": "Service",
-                "name": "实时充电桩查询"
-              }
-            },
-            {
-              "@type": "Offer", 
-              "itemOffered": {
-                "@type": "Service",
-                "name": "充电桩导航服务"
-              }
-            },
-            {
-              "@type": "Offer",
-              "itemOffered": {
-                "@type": "Service", 
-                "name": "充电状态监控"
-              }
-            }
-          ]
-        }
-      }
-    }
-    </script>
-    
-    <!-- Prevent zoom on input focus (iOS) -->
+    <title>EndlessPower</title>
     <style>
-      /* 防止移动端缩放输入框 */
-      @media screen and (-webkit-min-device-pixel-ratio: 0) {
-        select, textarea, input[type="text"], input[type="password"], input[type="datetime"], input[type="datetime-local"], input[type="date"], input[type="month"], input[type="time"], input[type="week"], input[type="number"], input[type="email"], input[type="url"], input[type="search"], input[type="tel"], input[type="color"] {
-          font-size: 16px !important;
-        }
-      }
-
-      /* PWA 沉浸式样式 */
-      html, body {
-        overflow-x: hidden;
-        -webkit-tap-highlight-color: transparent;
+      html,
+      body {
         margin: 0;
         padding: 0;
         height: 100%;
+        overflow: hidden;
+        -webkit-tap-highlight-color: transparent;
       }
-      
-      /* 全屏PWA模式支持 */
-      @media (display-mode: fullscreen) {
-        body {
-          padding-top: env(safe-area-inset-top);
-          padding-left: env(safe-area-inset-left);  
-          padding-right: env(safe-area-inset-right);
-          padding-bottom: env(safe-area-inset-bottom);
-        }
-        
-        /* 全屏模式下的动画效果 */
-        #root {
-          animation: immersiveEntry 0.6s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-        
-        @keyframes immersiveEntry {
-          from {
-            transform: scale(0.98);
-            opacity: 0.9;
-          }
-          to {
-            transform: scale(1);
-            opacity: 1;
-          }
-        }
-      }
-      
-      /* 状态栏透明模式下的安全区域 */
-      @supports (padding: max(0px)) {
-        .ios-safe-top {
-          padding-top: max(0.5rem, env(safe-area-inset-top));
-        }
-        .ios-safe-bottom {
-          padding-bottom: max(1rem, env(safe-area-inset-bottom));
-        }
-      }
-      
-      /* Root元素优化 */
       #root {
-        background: linear-gradient(135deg, #F9FAFB 0%, #F3F4F6 100%);
-        min-height: 100vh;
-        min-height: -webkit-fill-available;
-      }
-      
-      /* 深色模式优化 */
-      @media (prefers-color-scheme: dark) {
-        #root {
-          background: linear-gradient(135deg, #111827 0%, #1F2937 100%);
-        }
-      }
-      
-      /* 增强视觉效果 - 仅在PWA模式下 */
-      @media (display-mode: standalone), (display-mode: fullscreen) {
-        /* 添加微妙的边缘光效 */
-        body::before {
-          content: '';
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          height: 1px;
-          background: linear-gradient(90deg, transparent, rgba(59, 130, 246, 0.3), transparent);
-          z-index: 9999;
-        }
+        height: 100%;
       }
     </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
-    
-    <!-- Register Service Worker manually if needed -->
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js')
-            .then((registration) => {
-              console.log('SW registered: ', registration);
-            })
-            .catch((registrationError) => {
-              console.log('SW registration failed: ', registrationError);
-            });
-        });
-      }
-    </script>
   </body>
 </html>
+

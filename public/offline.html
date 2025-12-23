@@ -67,6 +67,19 @@
             background: rgba(255, 255, 255, 0.3);
             transform: translateY(-2px);
         }
+
+        .offline-actions {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .offline-tip {
+            margin: 1rem 0 0;
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
         
         .offline-features {
             margin-top: 2rem;
@@ -104,10 +117,19 @@
         <p>
             您当前处于离线状态。EndlessPower 支持离线浏览已缓存的充电桩信息。
         </p>
-        
-        <button class="retry-btn" onclick="location.reload()">
-            重新连接
-        </button>
+
+        <div class="offline-actions">
+            <button class="retry-btn" onclick="location.reload()">
+                重新连接
+            </button>
+            <button class="retry-btn" id="reset-btn" style="display: none;">
+                清除离线缓存
+            </button>
+        </div>
+
+        <p class="offline-tip" id="online-tip" style="display: none;">
+            检测到已联网但仍进入离线页：可能是离线缓存异常，可尝试“清除离线缓存”后再刷新。
+        </p>
         
         <div class="offline-features">
             <h3>离线功能：</h3>
@@ -121,23 +143,47 @@
     </div>
     
     <script>
-        // 检查网络状态
-        function updateOnlineStatus() {
-            if (navigator.onLine) {
-                // 如果重新联网，尝试返回主应用
-                window.location.href = '/';
+        function isLocalDevHost(hostname) {
+            return hostname === 'localhost' || hostname === '127.0.0.1';
+        }
+
+        function updateOnlineUI() {
+            const resetBtn = document.getElementById('reset-btn');
+            const tip = document.getElementById('online-tip');
+            if (!resetBtn || !tip) return;
+
+            if (navigator.onLine && isLocalDevHost(location.hostname)) {
+                resetBtn.style.display = 'inline-block';
+                tip.style.display = 'block';
+            } else {
+                resetBtn.style.display = 'none';
+                tip.style.display = 'none';
             }
         }
-        
-        window.addEventListener('online', updateOnlineStatus);
-        window.addEventListener('offline', updateOnlineStatus);
-        
-        // 定期检查网络状态
-        setInterval(() => {
-            if (navigator.onLine) {
-                updateOnlineStatus();
+
+        async function resetOfflineCache() {
+            try {
+                if ('serviceWorker' in navigator) {
+                    const regs = await navigator.serviceWorker.getRegistrations();
+                    await Promise.all(regs.map((r) => r.unregister()));
+                }
+
+                if ('caches' in window) {
+                    const keys = await caches.keys();
+                    await Promise.all(keys.map((k) => caches.delete(k)));
+                }
+            } catch (e) {
+                console.warn('Failed to reset offline cache', e);
+            } finally {
+                location.reload();
             }
-        }, 5000);
+        }
+
+        document.getElementById('reset-btn')?.addEventListener('click', resetOfflineCache);
+
+        window.addEventListener('online', updateOnlineUI);
+        window.addEventListener('offline', updateOnlineUI);
+        updateOnlineUI();
     </script>
 </body>
 </html>

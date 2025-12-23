@@ -1,60 +1,48 @@
-# Cloudflare Workers 配置 (wrangler v3.88.0^)
+# Cloudflare Workers 配置 (wrangler v4)
 name = "endlesspower"
 main = "src/worker/index.ts"
-compatibility_date = "2025-09-25"
+compatibility_date = "2025-12-01"
 
-# 静态资源配置
 [assets]
 directory = "./dist"
 
-# 日志观察性配置
 [observability.logs]
 enabled = true
 
-# 构建配置
 [build]
 command = "npm run build"
 
-# Durable Objects 配置
 [[durable_objects.bindings]]
 name = "VISITORS_COUNTER"
 class_name = "VisitorsCounter"
 
-# 迁移配置 - 添加新的 Durable Object 类
 [[migrations]]
 tag = "v1"
-new_sqlite_classes = ["VisitorsCounter"]
+deleted_classes = []
 
-# 开发环境配置
 [env.dev]
 name = "endlesspower"
 main = "src/worker/index.ts"
-compatibility_date = "2025-09-25"
-vars = { NODE_ENV = "development", DEBUG = "true" }
+compatibility_date = "2025-12-01"
+vars = { NODE_ENV = "development" }
 
 [env.dev.assets]
 directory = "./dist"
-
-[env.dev.observability.logs]
-enabled = true
 
 [[env.dev.durable_objects.bindings]]
 name = "VISITORS_COUNTER"
 class_name = "VisitorsCounter"
 
-# 生产环境配置  
 [env.production]
 name = "endlesspower"
 main = "src/worker/index.ts"
-compatibility_date = "2025-09-25"
-vars = { NODE_ENV = "production", DEBUG = "false" }
+compatibility_date = "2025-12-01"
+vars = { NODE_ENV = "production" }
 
 [env.production.assets]
 directory = "./dist"
 
-[env.production.observability.logs]
-enabled = true
-
 [[env.production.durable_objects.bindings]]
 name = "VISITORS_COUNTER"
 class_name = "VisitorsCounter"
+

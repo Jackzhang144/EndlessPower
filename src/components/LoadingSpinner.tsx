@@ -1,20 +1,16 @@
-import React from 'react'
+import { memo } from 'react'
 
-interface LoadingSpinnerProps {
-  text?: string
-  className?: string
+type LoadingSpinnerProps = {
+  label?: string
 }
 
-const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({ 
-  text = '加载中...', 
-  className = '' 
-}) => {
+function LoadingSpinner({ label = '加载中…' }: LoadingSpinnerProps) {
   return (
-    <div className={`flex items-center space-x-3 ${className}`}>
-      <div className="loader"></div>
-      <span className="font-semibold text-gray-700 dark:text-gray-200">{text}</span>
+    <div className="loading-pill" role="status" aria-live="polite" aria-label={label}>
+      <span className="loading-dot" aria-hidden="true" />
+      <span className="loading-text">{label}</span>
     </div>
   )
 }
 
-export default LoadingSpinner
+export default memo(LoadingSpinner)

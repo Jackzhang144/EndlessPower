@@ -1,0 +1,85 @@
+@import "@heroui/styles";
+@import "maplibre-gl/dist/maplibre-gl.css";
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+/* MapLibre control theming */
+.maplibregl-ctrl-top-left,
+.maplibregl-ctrl-top-right {
+  top: var(--hud-top) !important;
+}
+
+.maplibregl-ctrl-top-left {
+  left: calc(12px + var(--safe-left, 0px)) !important;
+}
+
+.maplibregl-ctrl-top-right {
+  right: calc(12px + var(--safe-right, 0px)) !important;
+}
+
+.maplibregl-ctrl-bottom-left,
+.maplibregl-ctrl-bottom-right {
+  bottom: calc(var(--hud-bottom) + var(--bottom-nav-height) + 12px) !important;
+}
+
+.maplibregl-ctrl-bottom-left {
+  left: calc(12px + var(--safe-left, 0px)) !important;
+}
+
+.maplibregl-ctrl-bottom-right {
+  right: calc(12px + var(--safe-right, 0px)) !important;
+}
+
+@media (max-width: 520px) {
+  /* 小屏幕避免和顶部搜索框遮挡：缩放/指南针用手势即可 */
+  .maplibregl-ctrl-top-right {
+    display: none !important;
+  }
+}
+
+.maplibregl-ctrl-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
+.maplibregl-ctrl-group button {
+  width: 44px;
+  height: 44px;
+  color: inherit;
+}
+
+.maplibregl-ctrl button {
+  color: inherit;
+}
+
+.maplibregl-ctrl-scale {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: var(--shadow-soft);
+  color: inherit;
+}
+
+.maplibregl-popup-content {
+  font: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* HeroUI modal uses animation events for exit; when motion is reduced we hide immediately. */
+  .modal__backdrop[data-exiting='true'],
+  .alert-dialog__backdrop[data-exiting='true'] {
+    display: none !important;
+    pointer-events: none !important;
+  }
+}

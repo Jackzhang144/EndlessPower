@@ -12,6 +12,7 @@ import {
   debugLocationMerge 
 } from './locationMerger'
 import { ENABLE_DEBUG } from '../config/environment'
+import { gcj02ToWgs84, isInChina, wgs84ToGcj02 } from './coords'
 
 const JITTER_AMOUNT = 0.0004
 
@@ -58,11 +59,22 @@ async function fetchAPI<T>(url: string, options: RequestInit = {}): Promise<T | 
       const data: ApiResponse<T> = await response.json()
       if (data.code === "1") {
         if (ENABLE_DEBUG) console.log(`✅ 直接请求成功`)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('api-using-real-data'))
+        }
         return data.data
       }
     }
   } catch (error) {
     if (ENABLE_DEBUG) console.warn(`❌ 直接请求失败，尝试代理服务`, error)
+  }
+
+  // 相对路径无法通过第三方代理转发
+  if (url.startsWith('/')) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('api-fallback-to-simulation'))
+    }
+    return getSimulatedData<T>(url)
   }
   
   // 尝试每个代理服务
@@ -85,7 +97,7 @@ async function fetchAPI<T>(url: string, options: RequestInit = {}): Promise<T | 
           throw new Error(`HTTP error: ${response.status}`)
         }
         
-        const result = await response.json()
+        const result = (await response.json()) as any
         if (result.status?.http_code !== 200) {
           throw new Error(`Proxy error: ${result.status?.http_code}`)
         }
@@ -106,6 +118,9 @@ async function fetchAPI<T>(url: string, options: RequestInit = {}): Promise<T | 
         }
         
         if (ENABLE_DEBUG) console.log(`✅ 代理成功: ${proxy.url}`)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('api-using-real-data'))
+        }
         return data.data
       } else {
         // 其他代理服务的标准处理
@@ -130,6 +145,9 @@ async function fetchAPI<T>(url: string, options: RequestInit = {}): Promise<T | 
         }
         
         if (ENABLE_DEBUG) console.log(`✅ 代理成功: ${proxy.url}`)
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('api-using-real-data'))
+        }
         return data.data
       }
     } catch (error) {
@@ -200,21 +218,26 @@ function getSimulatedData<T>(url: string): T | null {
 
 // 获取附近充电站
 export async function fetchNearStations(
-  lat = 30.754736739439924, 
-  lng = 103.92946279311207
+  // 默认位置（WGS84）：由旧版模拟/默认点(GCJ-02)换算得到
+  lat = 30.757444430112365,
+  lng = 103.9273601548557,
+  options: { coordFix?: boolean } = {}
 ): Promise<Station[]> {
   if (ENABLE_DEBUG) console.log('🔍 开始获取附近充电站...', { lat, lng })
   
-  const url = 'https://wemp.issks.com/device/v1/near/station'
+  const url = '/api/device/v1/near/station'
+
+  const coordFix = options.coordFix ?? true
+  const requestCoord = coordFix && isInChina(lat, lng) ? wgs84ToGcj02(lat, lng) : { lat, lng }
   
   const body: NearStationsRequest = {
     page: 1,
     pageSize: 200,
     scale: 3,
-    latitude: lat,
-    longitude: lng,
-    userLatitude: lat,
-    userLongitude: lng
+    latitude: requestCoord.lat,
+    longitude: requestCoord.lng,
+    userLatitude: requestCoord.lat,
+    userLongitude: requestCoord.lng
   }
   
   const data = await fetchAPI<NearStationsResponse>(url, {
@@ -234,64 +257,64 @@ export async function fetchNearStations(
   const stats = debugLocationMerge(mergeResults, false)
   if (ENABLE_DEBUG) console.log(`🗺️ 位置合并完成: ${stats.hardcoded}/${stats.total} 使用硬编码位置`)
   
-  return mergedStations
+  if (!coordFix) return mergedStations
+
+  return mergedStations.map((s) => {
+    if (!isInChina(s.latitude, s.longitude)) return s
+    const fixed = gcj02ToWgs84(s.latitude, s.longitude)
+    return { ...s, latitude: fixed.lat, longitude: fixed.lng }
+  })
 }
 
 // 获取充电站插座信息
 export async function fetchStationOutlets(stationId: number): Promise<Outlet[]> {
-  const url = `https://wemp.issks.com/charge/v1/outlet/station/outlets/${stationId}`
+  const url = `/api/charge/v1/outlet/station/outlets/${stationId}`
   const data = await fetchAPI<Outlet[]>(url)
   return data || []
 }
 
 // 获取插座状态
 export async function fetchOutletStatus(outletNo: string): Promise<OutletStatus | null> {
-  const url = `https://wemp.issks.com/charge/v1/charging/outlet/${outletNo}`
+  const url = `/api/charge/v1/charging/outlet/${outletNo}`
   return await fetchAPI<OutletStatus>(url)
 }
 
 // 应用坐标抖动以避免重叠
 export function applyJitter(stations: Station[]): Station[] {
-  const newStations: Station[] = []
-  const occupiedCoords = new Set<string>()
-  
-  const distanceSq = (p1: { lat: number; lng: number }, p2: { lat: number; lng: number }) => 
-    (p1.lat - p2.lat) ** 2 + (p1.lng - p2.lng) ** 2
-  
-  const minDistanceSq = (0.0003) ** 2
-  
-  stations.forEach(station => {
-    let newLat = station.latitude
-    let newLng = station.longitude
-    let attempts = 0
-    
-    while (attempts < 100) {
-      let collision = false
-      
-      for (const coord of occupiedCoords) {
-        const existing = JSON.parse(coord)
-        if (distanceSq({ lat: newLat, lng: newLng }, existing) < minDistanceSq) {
-          collision = true
-          newLat += (Math.random() - 0.5) * JITTER_AMOUNT
-          newLng += (Math.random() - 0.5) * JITTER_AMOUNT
-          break
-        }
-      }
-      
-      if (!collision) break
-      attempts++
+  // 保持抖动稳定：避免每次刷新 marker “抖来抖去”
+  const mulberry32 = (seed: number) => {
+    let t = seed >>> 0
+    return () => {
+      t += 0x6d2b79f5
+      let r = Math.imul(t ^ (t >>> 15), 1 | t)
+      r ^= r + Math.imul(r ^ (r >>> 7), 61 | r)
+      return ((r ^ (r >>> 14)) >>> 0) / 4294967296
     }
-    
-    occupiedCoords.add(JSON.stringify({ lat: newLat, lng: newLng }))
-    
-    newStations.push({
-      ...station,
-      latitude: newLat,
-      longitude: newLng
+  }
+
+  const distanceSq = (p1: { lat: number; lng: number }, p2: { lat: number; lng: number }) =>
+    (p1.lat - p2.lat) ** 2 + (p1.lng - p2.lng) ** 2
+
+  const minDistanceSq = 0.0003 ** 2
+  const occupied: Array<{ lat: number; lng: number }> = []
+
+  return [...stations]
+    .sort((a, b) => (a.stationId ?? 0) - (b.stationId ?? 0))
+    .map((station) => {
+      let newLat = station.latitude
+      let newLng = station.longitude
+      const rand = mulberry32((station.stationId ?? 0) + 0x9e3779b9)
+
+      for (let attempts = 0; attempts < 100; attempts++) {
+        const collides = occupied.some((p) => distanceSq({ lat: newLat, lng: newLng }, p) < minDistanceSq)
+        if (!collides) break
+        newLat += (rand() - 0.5) * JITTER_AMOUNT
+        newLng += (rand() - 0.5) * JITTER_AMOUNT
+      }
+
+      occupied.push({ lat: newLat, lng: newLng })
+      return { ...station, latitude: newLat, longitude: newLng }
     })
-  })
-  
-  return newStations
 }
 
 // 根据可用性获取颜色

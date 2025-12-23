@@ -5,11 +5,9 @@ export interface Env {
 
 // Durable Object 用于管理访问者计数
 export class VisitorsCounter {
-  private state: DurableObjectState;
   private sessions: Set<WebSocket>;
 
-  constructor(state: DurableObjectState, _env: Env) {
-    this.state = state;
+  constructor(_state: DurableObjectState, _env: Env) {
     this.sessions = new Set();
   }
 
@@ -103,6 +101,12 @@ export class VisitorsCounter {
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+
+    // API 反代，解决浏览器端 CORS（同源访问 /api/*）
+    if (url.pathname.startsWith('/api/')) {
+      const upstream = new URL(url.pathname.substring(4) + url.search, 'https://wemp.issks.com')
+      return fetch(new Request(upstream, request))
+    }
 
     // WebSocket 访问者计数端点
     if (url.pathname === '/ws/visitors') {

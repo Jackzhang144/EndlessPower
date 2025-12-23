@@ -6,6 +6,8 @@ export const useVisitorsCount = () => {
   const wsRef = useRef<WebSocket | null>(null)
 
   useEffect(() => {
+    if (navigator.webdriver) return
+
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = `${protocol}//${window.location.host}/ws/visitors`
     

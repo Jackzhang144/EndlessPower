@@ -4,7 +4,7 @@ import { Outlet } from '../types/station'
 
 export interface MonitorData {
   timestamp: number
-  power: number // 充电功率 (kW)
+  power: number // 充电功率 (W)
   fee: number // 累计费用
   duration: number // 充电时长(分钟)
 }

@@ -7,9 +7,9 @@
 export const getAppVersion = (): string => {
   // 优先使用构建时注入的版本号
   try {
-    return __APP_VERSION__ || '1.2.0'
+    return __APP_VERSION__ || '2.0.0'
   } catch {
-    return import.meta.env.VITE_APP_VERSION || '1.2.0'
+    return import.meta.env.VITE_APP_VERSION || '2.0.0'
   }
 }
 
